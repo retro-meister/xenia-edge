@@ -8,6 +8,9 @@
  */
 
 #include "xenia/vfs/devices/xcontent_devices/svod_container_device.h"
+
+#include <vector>
+
 #include "xenia/base/logging.h"
 #include "xenia/vfs/devices/xcontent_devices/svod_container_entry.h"
 #include "xenia/vfs/gdfx_util.h"
@@ -43,6 +46,13 @@ SvodContainerDevice::Result SvodContainerDevice::LoadHostFiles() {
   }
 
   auto fragment_files = filesystem::ListFiles(data_fragment_path);
+  // macOS adds AppleDouble sidecars on filesystems such as exFAT, and Finder
+  // may add .DS_Store. Neither is part of the SVOD fragment set. Ignore these
+  // on all hosts since the same drive may later be used on Windows or Linux.
+  std::erase_if(fragment_files, [](const filesystem::FileInfo& fragment) {
+    return xe::path_to_utf8(fragment.name).starts_with("._") ||
+           fragment.name == ".DS_Store";
+  });
 
   if (fragment_files.size() != header_->content_metadata.data_file_count) {
     XELOGE("SVOD expecting {} data fragments, but {} are present.",
