@@ -1,0 +1,67 @@
+name: Metal scaling prototype
+'on':
+  push:
+    branches:
+    - prototype/metal-resolution-scaling
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  actions: write
+jobs:
+  build-macos-arm64:
+    name: Build macOS ARM64
+    runs-on: macos-26
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Cache Slang
+      id: cache-slang
+      uses: actions/cache@v5
+      with:
+        path: .slang
+        key: ${{ runner.os }}-${{ runner.arch }}-slang-2026.8
+    - name: Download Slang
+      if: steps.cache-slang.outputs.cache-hit != 'true'
+      run: ./xenia-build.py slang
+    - name: Cache Metal Shader Converter
+      id: cache-msc
+      uses: actions/cache@v5
+      with:
+        path: .metal-shader-converter
+        key: ${{ runner.os }}-metal-shader-converter-4.0-beta2
+    - name: Download Metal Shader Converter
+      if: steps.cache-msc.outputs.cache-hit != 'true'
+      run: ./xenia-build.py msc
+    - name: Setup
+      run: "# Update submodules. Skip DirectXShaderCompiler (the DXIL that the\n# Metal backend converts comes from mesa's spirv_to_dxil, not\n# dxilconv).\ngit submodule update --init --depth=1 -j$(sysctl -n hw.ncpu) \\\n  $(grep -oE 'path = .+' .gitmodules | sed 's/path = //' \\\n    | grep -v 'DirectXShaderCompiler')\n\n# wxWidgets has nested submodules (pcre, libpng, ...) needed when\n# building from vendored source.\ngit submodule update --init --recursive --depth=1 \\\n  -j$(sysctl -n hw.ncpu) third_party/wxWidgets\n\n# Fetch data repos (game-patches)\n./xenia-build.py fetchdata\n"
+    - name: Set up Python for Meson
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.13'
+    - name: Install Meson for spirv_to_dxil
+      run: python3 -m pip install --upgrade meson mako pyyaml packaging
+    - name: Install Metal Toolchain
+      run: "for attempt in 1 2 3 4 5; do\n  if sudo xcodebuild -downloadComponent MetalToolchain; then\n    exit 0\n  fi\n  if [ $attempt -lt 5 ]; then\n    delay=$((attempt * 30))\n    echo \"::warning::MetalToolchain download attempt $attempt failed; retrying in ${delay}s\"\n    sleep $delay\n  fi\ndone\necho \"::error::MetalToolchain download failed after 5 attempts\"\nexit 1\n"
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@v0.0.10
+    - name: Build
+      env:
+        SCCACHE_GHA_ENABLED: 'true'
+        CMAKE_C_COMPILER_LAUNCHER: sccache
+        CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      run: ./xenia-build.py build --config=release --target=xenia-app --disable-lto
+    - name: sccache stats
+      if: always()
+      run: sccache --show-stats
+    - name: Prepare artifacts
+      id: prepare_artifacts
+      run: "app_bundle=\"build/bin/macOS/Release/Xenia-edge.app\"\nif [ ! -d \"$app_bundle\" ]; then\n  echo \"::error::App bundle not found at $app_bundle\"\n  ls -la build/bin/macOS/Release/ 2>&1 || true\n  exit 1\nfi\nmain_exe=\"$app_bundle/Contents/MacOS/Xenia-edge\"\nif [ \"$(stat -f%z \"$main_exe\")\" -le 100000 ]; then\n  echo \"::error::$main_exe is too small.\"\n  exit 1\nfi\n# Confirm we actually produced an arm64 binary (not x86_64).\nif ! file \"$main_exe\" | grep -q \"arm64\"; then\n  echo \"::error::$main_exe is not arm64:\"\n  file \"$main_exe\"\n  exit 1\nfi\n\n# DMG with an Applications symlink for drag-install UX.\nmkdir -p dmg_contents\ncp -R \"$app_bundle\" dmg_contents/\ncp LICENSE dmg_contents/\nln -s /Applications dmg_contents/Applications\n\nmkdir -p artifacts/release\nhdiutil create -volname \"Xenia-edge\" \\\n  -srcfolder dmg_contents -ov -format UDZO \\\n  artifacts/release/xenia_edge_macos.dmg\nrm -rf dmg_contents\n"
+    - name: Upload xenia edge macOS artifacts
+      if: steps.prepare_artifacts.outcome == 'success'
+      uses: actions/upload-artifact@v7
+      with:
+        name: xenia_edge_macos
+        path: artifacts/release
+        if-no-files-found: error
+    timeout-minutes: 60

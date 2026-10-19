@@ -1711,8 +1711,26 @@ bool MetalCommandProcessor::SetupContext() {
     return false;
   }
 
-  texture_cache_ = std::make_unique<MetalTextureCache>(this, *register_file_,
-                                                       *shared_memory_, 1, 1);
+  // Experimental: wire the existing scaled render/resolve paths to the GPU
+  // settings. Limit this prototype to 2x per axis until larger scales have
+  // been validated for allocation size, shader correctness, and performance.
+  uint32_t scale_x, scale_y;
+  bool scale_supported =
+      TextureCache::GetConfigDrawResolutionScale(scale_x, scale_y);
+  if (scale_x > 2 || scale_y > 2) {
+    scale_x = std::min(scale_x, 2u);
+    scale_y = std::min(scale_y, 2u);
+    scale_supported = false;
+  }
+  if (!scale_supported) {
+    XELOGW("Metal prototype: requested resolution scale clamped to {}x{}",
+           scale_x, scale_y);
+  }
+  XELOGI("Metal prototype: internal rendering resolution scale {}x{}", scale_x,
+         scale_y);
+
+  texture_cache_ = std::make_unique<MetalTextureCache>(
+      this, *register_file_, *shared_memory_, scale_x, scale_y);
   if (!texture_cache_->Initialize()) {
     XELOGE("Failed to initialize Metal texture cache");
     return false;
@@ -1720,7 +1738,7 @@ bool MetalCommandProcessor::SetupContext() {
 
   // Initialize render target cache
   render_target_cache_ = std::make_unique<MetalRenderTargetCache>(
-      *register_file_, *memory_, &trace_writer_, 1, 1, *this);
+      *register_file_, *memory_, &trace_writer_, scale_x, scale_y, *this);
   if (!render_target_cache_->Initialize()) {
     XELOGE("Failed to initialize Metal render target cache");
     return false;

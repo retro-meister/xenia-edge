@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches-ignore:
+      - prototype/metal-resolution-scaling
     paths-ignore:
       - '*.md'
       - 'docs/**'

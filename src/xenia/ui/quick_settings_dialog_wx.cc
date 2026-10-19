@@ -172,7 +172,12 @@ void QuickSettingsDialog::Build() {
     add_form_row(grid, rt_label, rt);
 
     auto* scale = new wxChoice(box, wxID_ANY);
-    for (int i = 1; i <= 8; ++i) {
+#if XE_PLATFORM_MAC
+    constexpr int max_resolution_scale = 2;
+#else
+    constexpr int max_resolution_scale = 8;
+#endif
+    for (int i = 1; i <= max_resolution_scale; ++i) {
       scale->Append(i == 1 ? _("Native") : wxString::Format("%dx", i),
                     reinterpret_cast<void*>(static_cast<intptr_t>(i)));
     }
@@ -188,12 +193,13 @@ void QuickSettingsDialog::Build() {
     add_form_row(grid, scale_label, scale);
 
 #if XE_PLATFORM_MAC
-    // Metal and the null backend don't implement render target path
-    // selection or resolution scaling.
+    // Metal still doesn't implement render target path selection. Resolution
+    // scaling is experimental and limited to Native / 2x in this prototype.
     rt->Disable();
     rt_label->Disable();
-    scale->Disable();
-    scale_label->Disable();
+    scale->SetToolTip(
+        _("Experimental Metal resolution scaling. Restart the "
+          "game after changing this. May cause rendering issues."));
 #endif
 
     auto* fps = add_spin(box, "framerate_limit", 0, 1000);
