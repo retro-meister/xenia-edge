@@ -39,3 +39,22 @@ this prototype branch.
 
 Gameplay validation is intentionally left to the user. The provided launchers
 use an isolated copy of Xenia's user data and pass explicit 1x or 2x overrides.
+
+## Cutscene buffer-growth regression
+
+A user reproduced a 2x-only crash entering an NGII cutscene; the same prototype
+at 1x passed. The captured GPU-thread stack stopped in `MTLReportFailure`, then
+`blitCommandEncoderCommon:`, `EnsureScaledResolveBufferRange`,
+`TextureCache::LoadTexturesData`, and `PrepareDrawTextures`.
+
+Growing an overlapping scaled resolve buffer now closes the submission's active
+render encoder before starting the preservation blit. `PrepareDrawTextures`
+reopens the render pass afterward; ending the encoder without reopening it would
+leave the following draw without an encoder. The close action resets cached
+pipeline/binding state, so both the DXIL and MSL draw paths rebind it.
+
+A local native Metal validation harness executing the production buffer-growth
+method reproduced `failed assertion: encoding in progress` without the fix.
+With the fix it preserved the old buffer's 64 test bytes and resumed a load/store
+render pass while preserving its color. This verifies the encoder sequencing;
+the actual door transition still requires a gameplay retest.

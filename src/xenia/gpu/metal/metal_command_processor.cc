@@ -3327,6 +3327,16 @@ bool MetalCommandProcessor::PrepareDrawTextures(uint32_t used_texture_mask,
   if (texture_cache_ && used_texture_mask &&
       texture_cache_->AnyUsedTextureRequestWorkPending(used_texture_mask)) {
     texture_cache_->RequestTextures(used_texture_mask);
+    // Growing a scaled resolve buffer may have ended the render encoder to
+    // copy its previous contents. Reopen the pass and rebind its state before
+    // either draw path applies pipeline state or issues a draw.
+    if (!current_render_encoder_) {
+      BeginCommandBuffer();
+      if (!current_command_buffer_ || !current_render_encoder_) {
+        XELOGE("Metal: failed to resume rendering after texture uploads");
+        return false;
+      }
+    }
   }
   return true;
 }

@@ -3128,6 +3128,13 @@ bool MetalTextureCache::EnsureScaledResolveBufferRange(uint64_t start_scaled,
       }
     }
 
+    // A scaled texture request can grow this buffer between draws, while the
+    // submission's render encoder is still open. Metal permits only one
+    // active encoder per command buffer. Finish that pass before preserving
+    // the old ranges with a blit; PrepareDrawTextures resumes rendering.
+    if (cmd == current_cmd) {
+      command_processor_->EndRenderEncoder();
+    }
     MTL::BlitCommandEncoder* blit = cmd->blitCommandEncoder();
     if (!blit) {
       new_buffer->release();
